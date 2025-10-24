@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Computer Trivia Flashcards</title>
+  <style>
+    :root {
+      --bg: #0b132b;
+      --card: #1c2541;
+      --accent: #5bc0be;
+      --text: #e6e6e6;
+      --muted: #a8b0c3;
+      --right: #2ecc71;
+      --wrong: #ff6b6b;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 20% -10%, #112240 0%, var(--bg) 50%);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+    }
+    .app {
+      width: min(900px, 92vw);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+      padding: 22px 22px 18px;
+    }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    header h1 { font-size: clamp(18px, 4vw, 22px); margin: 0; font-weight: 700; letter-spacing: 0.2px; }
+    .pill { font-size: 12px; color: var(--bg); background: var(--accent); padding: 4px 10px; border-radius: 999px; font-weight: 700; }
+
+    .meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; margin-top: 6px; }
+    .progress { height: 8px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; margin: 14px 0 18px; }
+    .bar { height: 100%; width: 0%; background: var(--accent); transition: width 280ms ease; }
+
+    .card { background: var(--card); border-radius: 16px; padding: 18px; border: 1px solid rgba(255,255,255,0.06); }
+    .question { font-size: clamp(18px, 3.8vw, 22px); line-height: 1.4; margin: 0 0 14px; }
+    .answers { display: grid; gap: 10px; }
+    .ans {
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.02);
+      color: var(--text);
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 16px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .ans:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.2); }
+    .ans[disabled] { opacity: 0.75; cursor: not-allowed; }
+    .ans.correct { background: rgba(46, 204, 113, 0.12); border-color: var(--right); }
+    .ans.incorrect { background: rgba(255, 107, 107, 0.12); border-color: var(--wrong); }
+
+    .controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+    .left, .right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    button.primary {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 120ms ease, filter 120ms ease;
+    }
+    button.primary:disabled { filter: grayscale(0.7) brightness(0.8); cursor: not-allowed; }
+    button.primary:hover:not(:disabled) { transform: translateY(-1px); }
+
+    .status { font-size: 14px; color: var(--muted); }
+    .score { font-weight: 700; color: var(--text); }
+    .tiny { font-size: 12px; color: var(--muted); }
+    .error { color: #ffd2d2; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Science: Computers <span class="pill">Open Trivia DB</span></h1>
+      <div class="status" id="status">Loading…</div>
+    </header>
+
+    <div class="meta">
+      <div>Question <span id="qIndex">0</span>/<span id="qTotal">0</span></div>
+      <div>Score: <span class="score" id="score">0</span></div>
+      <div class="tiny">Token: <span id="tokenTiny">—</span></div>
+    </div>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+
+    <div class="card" id="card">
+      <p class="question" id="question">Fetching questions…</p>
+      <div class="answers" id="answers"></div>
+    </div>
+
+    <div class="controls">
+      <div class="left">
+        <button class="primary" id="nextBtn" disabled>Next</button>
+        <button class="primary" id="newSetBtn">New Set</button>
+      </div>
+      <div class="right">
+        <span class="tiny">Data: CC BY-SA 4.0 · No API key required</span>
+      </div>
+    </div>
+
+    <p id="error" class="tiny error hidden"></p>
+  </div>
+
+  <script>
+    // === Simple Computer Trivia Flashcards using Open Trivia DB ===
+    // Category 18 = Science: Computers
+    const API_BASE = 'https://opentdb.com';
+    const CATEGORY_ID = 18;
+    const AMOUNT = 20; // up to 50
+
+    // State
+    let token = null;
+    let questions = [];
+    let index = 0;
+    let score = 0;
+    let answered = false;
+
+    // UI refs
+    const qEl = document.getElementById('question');
+    const aWrap = document.getElementById('answers');
+    const statusEl = document.getElementById('status');
+    const scoreEl = document.getElementById('score');
+    const qIndexEl = document.getElementById('qIndex');
+    const qTotalEl = document.getElementById('qTotal');
+    const nextBtn = document.getElementById('nextBtn');
+    const newSetBtn = document.getElementById('newSetBtn');
+    const barEl = document.getElementById('bar');
+    const errorEl = document.getElementById('error');
+    const tokenTiny = document.getElementById('tokenTiny');
+
+    nextBtn.addEventListener('click', nextQuestion);
+    newSetBtn.addEventListener('click', newSet);
+
+    // Helpers
+    function shuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+    function b64decodeUtf8(b64) {
+      // Proper UTF-8 base64 decode
+      const bytes = Uint8Array.from(atob(b64), m => m.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    function setError(msg) {
+      if (!msg) { errorEl.classList.add('hidden'); errorEl.textContent = ''; return; }
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+    }
+
+    async function getToken() {
+      const res = await fetch(`${API_BASE}/api_token.php?command=request`);
+      const data = await res.json();
+      if (data.response_code === 0) {
+        return data.token;
+      }
+      throw new Error('Could not retrieve token.');
+    }
+
+    async function fetchQuestions() {
+      setError('');
+      const url = `${API_BASE}/api.php?amount=${AMOUNT}&category=${CATEGORY_ID}&encode=base64&token=${token}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      // Handle response codes per docs
+      switch (data.response_code) {
+        case 0: // success
+          return data.results.map(q => ({
+            type: b64decodeUtf8(q.type),
+            difficulty: b64decodeUtf8(q.difficulty),
+            category: b64decodeUtf8(q.category),
+            question: b64decodeUtf8(q.question),
+            correct_answer: b64decodeUtf8(q.correct_answer),
+            incorrect_answers: q.incorrect_answers.map(b64decodeUtf8),
+          }));
+        case 1:
+          throw new Error('No results for this query. Try New Set again.');
+        case 3:
+          throw new Error('Token not found. Getting a new token…');
+        case 4:
+          // Token empty (exhausted) — reset then retry
+          await resetToken();
+          return fetchQuestions();
+        case 5:
+          await delay(1200);
+          return fetchQuestions();
+        default:
+          throw new Error('Unexpected response.');
+      }
+    }
+
+    async function resetToken() {
+      if (!token) return;
+      await fetch(`${API_BASE}/api_token.php?command=reset&token=${token}`);
+    }
+
+    function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function render() {
+      scoreEl.textContent = String(score);
+      qTotalEl.textContent = String(questions.length);
+      qIndexEl.textContent = String(Math.min(index + 1, questions.length));
+      barEl.style.width = questions.length ? `${(index / questions.length) * 100}%` : '0%';
+
+      if (index >= questions.length) {
+        qEl.textContent = `Done! Final score: ${score}/${questions.length}.`;
+        aWrap.innerHTML = '';
+        nextBtn.disabled = true;
+        setStatus('Complete');
+        barEl.style.width = '100%';
+        return;
+      }
+
+      const q = questions[index];
+      qEl.textContent = q.question;
+      aWrap.innerHTML = '';
+      const answers = q.type === 'boolean'
+        ? ['True', 'False']
+        : shuffle([q.correct_answer, ...q.incorrect_answers]);
+
+      answers.forEach(ans => {
+        const btn = document.createElement('button');
+        btn.className = 'ans';
+        btn.textContent = ans;
+        btn.addEventListener('click', () => choose(ans));
+        aWrap.appendChild(btn);
+      });
+
+      answered = false;
+      nextBtn.disabled = true;
+      setStatus(`${q.difficulty.toUpperCase()} • ${q.category}`);
+    }
+
+    function choose(ans) {
+      if (answered) return;
+      answered = true;
+      const q = questions[index];
+      const buttons = [...document.querySelectorAll('.ans')];
+      buttons.forEach(b => b.disabled = true);
+
+      if (ans === q.correct_answer) {
+        score++;
+      }
+
+      buttons.forEach(b => {
+        if (b.textContent === q.correct_answer) b.classList.add('correct');
+        if (b.textContent === ans && ans !== q.correct_answer) b.classList.add('incorrect');
+      });
+
+      scoreEl.textContent = String(score);
+      nextBtn.disabled = false;
+    }
+
+    function nextQuestion() {
+      if (!answered) return; // require an attempt before moving on
+      index++;
+      render();
+    }
+
+    async function newSet() {
+      try {
+        setStatus('Preparing new set…');
+        setError('');
+        if (!token) {
+          token = await getToken();
+          tokenTiny.textContent = token.slice(0, 6) + '…';
+        }
+        const res = await fetchQuestions();
+        if (!res || !res.length) throw new Error('No questions returned.');
+        questions = res;
+        index = 0;
+        score = 0;
+        render();
+      } catch (err) {
+        setError(err.message || String(err));
+        setStatus('Error');
+      }
+    }
+
+    // Initial load
+    newSet();
+  </script>
+</body>
+</html>
